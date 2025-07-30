@@ -1,0 +1,241 @@
+{
+  "workflow_name": "Gestión de Contenido Audiovisual Automatizada (HeyGen y Airtable)",
+  "description": "Automatización para la creación de videos con HeyGen a partir de datos de Airtable y la transcripción de audio a texto, con notificaciones vía Slack.",
+  "flows": [
+    {
+      "flow_name": "Agente de Creación de Video (Airtable a HeyGen Video)",
+      "trigger": {
+        "node_type": "ManualTrigger",
+        "description": "Disparador manual para pruebas y ejecución bajo demanda."
+      },
+      "nodes": [
+        {
+          "node_name": "Leer Datos de Airtable",
+          "node_type": "Airtable",
+          "operation": "Get Many",
+          "configuration": {
+            "authentication": "Airtable API",
+            "base_id": "YOUR_AIRTABLE_BASE_ID_HERE",
+            "table_id": "YOUR_AIRTABLE_TABLE_ID_FOR_VIDEOS_HERE",
+            "filter_by_formula": "{Estado} = 'Pendiente'",
+            "fields": ["Titulo", "Descripcion", "PromptVideo", "FormatoVideo", "Estado"]
+          },
+          "connections": {
+            "output_to": "Generar Video con HeyGen"
+          }
+        },
+        {
+          "node_name": "Generar Video con HeyGen",
+          "node_type": "HttpRequest",
+          "description": "Envía los datos a la API de HeyGen para generar un video.",
+          "configuration": {
+            "method": "POST",
+            "url": "https://api.heygen.com/v1/video",
+            "headers": [
+              { "name": "Content-Type", "value": "application/json" },
+              { "name": "X-Api-Key", "value": "YOUR_HEYGEN_API_KEY_HERE" }
+            ],
+            "body": "{ \"title\": \"{{ $json.Titulo }}\", \"script\": \"{{ $json.Descripcion }}\", \"voice_id\": \"YOUR_HEYGEN_VOICE_ID_HERE\", \"avatar_id\": \"YOUR_HEYGEN_AVATAR_ID_HERE\", \"video_resolution\": \"{{ $json.FormatoVideo }}\" }",
+            "json_parameters": true
+          },
+          "connections": {
+            "output_to": "Actualizar Airtable con ID de Video",
+            "error_to": "Notificación de Error de Video (Slack)"
+          }
+        },
+        {
+          "node_name": "Actualizar Airtable con ID de Video",
+          "node_type": "Airtable",
+          "operation": "Update",
+          "configuration": {
+            "authentication": "Airtable API",
+            "base_id": "YOUR_AIRTABLE_BASE_ID_HERE",
+            "table_id": "YOUR_AIRTABLE_TABLE_ID_FOR_VIDEOS_HERE",
+            "record_id": "{{ $json.id }}",
+            "fields": {
+              "HeyGen_VideoID": "{{ $json.response.data.video_id }}",
+              "Estado": "En Proceso"
+            }
+          },
+          "connections": {
+            "output_to": "Esperar Creación de Video (Opcional)"
+          }
+        },
+        {
+          "node_name": "Esperar Creación de Video (Opcional)",
+          "node_type": "Wait",
+          "description": "Espera un tiempo para que HeyGen procese el video. Ajusta el tiempo según lo que necesite HeyGen.",
+          "configuration": {
+            "time_amount": 5,
+            "time_unit": "minutes"
+          },
+          "connections": {
+            "output_to": "Obtener URL de Video de HeyGen"
+          }
+        },
+        {
+          "node_name": "Obtener URL de Video de HeyGen",
+          "node_type": "HttpRequest",
+          "description": "Consulta el estado del video en HeyGen para obtener la URL final.",
+          "configuration": {
+            "method": "GET",
+            "url": "https://api.heygen.com/v1/video/{{ $json.HeyGen_VideoID }}",
+            "headers": [
+              { "name": "X-Api-Key", "value": "YOUR_HEYGEN_API_KEY_HERE" }
+            ],
+            "json_parameters": false
+          },
+          "connections": {
+            "output_to": "Actualizar Airtable con URL Final",
+            "error_to": "Notificación de Error de Video (Slack)"
+          }
+        },
+        {
+          "node_name": "Actualizar Airtable con URL Final",
+          "node_type": "Airtable",
+          "operation": "Update",
+          "configuration": {
+            "authentication": "Airtable API",
+            "base_id": "YOUR_AIRTABLE_BASE_ID_HERE",
+            "table_id": "YOUR_AIRTABLE_TABLE_ID_FOR_VIDEOS_HERE",
+            "record_id": "{{ $json.id }}",
+            "fields": {
+              "URL_VideoGenerado": "{{ $json.response.data.video_url }}",
+              "Estado": "Completado"
+            }
+          },
+          "connections": {
+            "output_to": "Notificación de Video Creado (Slack)"
+          }
+        },
+        {
+          "node_name": "Notificación de Video Creado (Slack)",
+          "node_type": "Slack",
+          "operation": "Post a Message",
+          "configuration": {
+            "authentication": "Slack OAuth",
+            "channel": "#videos-generados",
+            "text": "🎥 ¡Video Creado Exitosamente!\n*Título:* {{ $json.Titulo }}\n*Descripción:* {{ $json.Descripcion }}\n*URL:* <{{ $json.response.data.video_url }}|Ver Video>"
+          },
+          "connections": {}
+        },
+        {
+          "node_name": "Notificación de Error de Video (Slack)",
+          "node_type": "Slack",
+          "operation": "Post a Message",
+          "description": "Notifica si hubo un error al generar el video en HeyGen.",
+          "configuration": {
+            "authentication": "Slack OAuth",
+            "channel": "#alertas-n8n",
+            "text": "⚠️ Error al crear video: {{ $json.Titulo }}\n*Mensaje de Error:* {{ $json.error.message }}"
+          },
+          "connections": {}
+        }
+      ]
+    },
+    {
+      "flow_name": "Agente de Reconocimiento de Audio (Audio a Airtable)",
+      "trigger": {
+        "node_type": "Webhook",
+        "description": "Disparador Webhook para recibir archivos de audio.",
+        "configuration": {
+          "http_method": "POST",
+          "response_mode": "responseNode"
+        }
+      },
+      "nodes": [
+        {
+          "node_name": "Recibir Audio y Guardar Temporalmente",
+          "node_type": "WriteBinaryFile",
+          "description": "Guarda el archivo de audio recibido en una ubicación temporal.",
+          "configuration": {
+            "path": "/tmp/audio_{{ $json.__file.name }}",
+            "file_content": "{{ $json.__file.data }}"
+          },
+          "connections": {
+            "output_to": "Transcribir Audio con IA"
+          }
+        },
+        {
+          "node_name": "Transcribir Audio con IA",
+          "node_type": "HttpRequest",
+          "description": "Envía el archivo de audio a una API de transcripción (ej. OpenAI Whisper, AssemblyAI).",
+          "configuration": {
+            "method": "POST",
+            "url": "YOUR_AUDIO_TRANSCRIPTION_API_URL_HERE",
+            "headers": [
+              { "name": "Authorization", "value": "Bearer YOUR_AUDIO_API_KEY_HERE" }
+            ],
+            "body": {
+              "file": {
+                "fileName": "{{ $json.__file.name }}",
+                "fileData": "{{ $json.__file.data }}"
+              }
+            },
+            "json_parameters": false,
+            "body_content_type": "multipart/form-data"
+          },
+          "connections": {
+            "output_to": "Procesar Transcripción",
+            "error_to": "Notificación de Error de Audio (Slack)"
+          }
+        },
+        {
+          "node_name": "Procesar Transcripción",
+          "node_type": "Function",
+          "description": "Procesa la transcripción para generar título, descripción y prompt del video.",
+          "configuration": {
+            "function_code": "const transcription = $json.response.text; // Ajusta según la respuesta de tu API\nlet title = transcription.substring(0, Math.min(transcription.length, 50));\nif (transcription.length > 50) title += \"...\";\nlet description = transcription.substring(0, Math.min(transcription.length, 200));\nif (transcription.length > 200) description += \"...\";\nlet videoPrompt = \"Crea un video educativo basado en este contenido: \" + title + \". Enfócate en los puntos principales.\";\nlet videoFormat = \"MP4\"; // Puedes ajustar esto si HeyGen soporta otros\n\nreturn [\n  {\n    json: {\n      Titulo: title,\n      Descripcion: description,\n      PromptVideo: videoPrompt,\n      FormatoVideo: videoFormat,\n      TranscripcionOriginal: transcription,\n      FechaCreacion: new Date().toISOString()\n    }\n  }\n];"
+          },
+          "connections": {
+            "output_to": "Guardar Datos en Airtable"
+          }
+        },
+        {
+          "node_name": "Guardar Datos en Airtable",
+          "node_type": "Airtable",
+          "operation": "Create",
+          "configuration": {
+            "authentication": "Airtable API",
+            "base_id": "YOUR_AIRTABLE_BASE_ID_HERE",
+            "table_id": "YOUR_AIRTABLE_TABLE_ID_FOR_AUDIOS_HERE",
+            "fields": {
+              "Titulo": "{{ $json.Titulo }}",
+              "Descripcion": "{{ $json.Descripcion }}",
+              "PromptVideo": "{{ $json.PromptVideo }}",
+              "FormatoVideo": "{{ $json.FormatoVideo }}",
+              "TranscripcionOriginal": "{{ $json.TranscripcionOriginal }}",
+              "FechaCreacion": "{{ $json.FechaCreacion }}"
+            }
+          },
+          "connections": {
+            "output_to": "Notificación de Audio Procesado (Slack)"
+          }
+        },
+        {
+          "node_name": "Notificación de Audio Procesado (Slack)",
+          "node_type": "Slack",
+          "operation": "Post a Message",
+          "configuration": {
+            "authentication": "Slack OAuth",
+            "channel": "#audios-transcritos",
+            "text": "🔊 ¡Audio Procesado Exitosamente!\n*Título:* {{ $json.Titulo }}\n*Transcripción (extracto):* {{ $json.TranscripcionOriginal.substring(0, 100) }}..."
+          },
+          "connections": {}
+        },
+        {
+          "node_name": "Notificación de Error de Audio (Slack)",
+          "node_type": "Slack",
+          "operation": "Post a Message",
+          "description": "Notifica si hubo un error al transcribir el audio.",
+          "configuration": {
+            "authentication": "Slack OAuth",
+            "channel": "#alertas-n8n",
+            "text": "⚠️ Error al procesar audio.\n*Mensaje de Error:* {{ $json.error.message }}"
+          },
+          "connections": {}
+        }
+      ]
+    }
+  ]
+}
