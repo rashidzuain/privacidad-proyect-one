@@ -1,0 +1,923 @@
+{
+  "name": "Proyect One - Audio a transcripcion en Airtable",
+  "active": false,
+  "nodes": [
+    {
+      "id": "proyectOneAudio-1",
+      "name": "Recibir audio",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "proyect-one-audio-v1",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "1a5dfe1d-8ee0-4e51-85d5-eaf0f111b002",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_WEBHOOK",
+          "name": "Proyect One - Webhook"
+        }
+      }
+    },
+    {
+      "id": "proyectOneAudio-2",
+      "name": "Configuracion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function validateConfig(cfg, mode = 'video') {\n  const required = mode === 'video'\n    ? ['airtableBaseId', 'videosTableId', 'slackVideosChannel', 'slackErrorsChannel']\n    : ['airtableBaseId', 'audiosTableId', 'slackAudioChannel', 'slackErrorsChannel', 'transcriptionModel'];\n  for (const key of required) {\n    if (typeof cfg[key] !== 'string' || !cfg[key].trim() || /CONFIGURAR/.test(cfg[key])) {\n      throw new Error('Configurá el campo ' + key + ' en el nodo Configuracion.');\n    }\n  }\n  const allowed = {\n    airtableBaseUrl: 'https://api.airtable.com/v0',\n    heygenBaseUrl: 'https://api.heygen.com/v3',\n    slackBaseUrl: 'https://slack.com/api',\n    transcriptionBaseUrl: 'https://api.groq.com/openai/v1',\n  };\n  for (const [key, expected] of Object.entries(allowed)) {\n    if (mode === 'video' && key === 'transcriptionBaseUrl') continue;\n    if (mode === 'audio' && key === 'heygenBaseUrl') continue;\n    const value = cfg[key];\n    const localMock = cfg.allowLocalMock === true && /^http:\\/\\/127\\.0\\.0\\.1:\\d+(?:\\/[^?#]*)?$/.test(value);\n    const alternative = key === 'transcriptionBaseUrl' && value === 'https://api.openai.com/v1';\n    if (value !== expected && !alternative && !localMock) throw new Error('URL no permitida: ' + key);\n  }\n  if (mode === 'video') {\n    if (typeof cfg.generationEnabled !== 'boolean') throw new Error('generationEnabled debe ser true o false.');\n    if (!Number.isInteger(cfg.maxPolls) || cfg.maxPolls < 1 || cfg.maxPolls > 120) throw new Error('maxPolls debe estar entre 1 y 120.');\n    if (!Number.isInteger(cfg.pollIntervalSeconds) || cfg.pollIntervalSeconds < 1 || cfg.pollIntervalSeconds > 300) throw new Error('pollIntervalSeconds debe estar entre 1 y 300.');\n    if (!Number.isInteger(cfg.maxRecordsPerRun) || cfg.maxRecordsPerRun < 0) throw new Error('maxRecordsPerRun debe ser 0 o un entero positivo.');\n    if (!['720p', '1080p'].includes(cfg.resolution)) throw new Error('resolution debe ser 720p o 1080p.');\n    if (!['auto', '16:9', '9:16', '1:1', '4:5', '5:4'].includes(cfg.aspectRatio)) throw new Error('aspectRatio no admitido.');\n    if (cfg.generationEnabled && (!cfg.avatarId || !cfg.voiceId || /CONFIGURAR/.test(cfg.avatarId + cfg.voiceId))) throw new Error('Configurá avatarId y voiceId antes de permitir generación.');\n  }\n  if (mode === 'audio' && (!Number.isInteger(cfg.maxAudioBytes) || cfg.maxAudioBytes < 1 || cfg.maxAudioBytes > 20 * 1024 * 1024)) throw new Error('maxAudioBytes debe estar entre 1 y 20971520.');\n  return { ...cfg };\n}\n\nconst cfg = {\n  \"airtableBaseUrl\": \"https://api.airtable.com/v0\",\n  \"airtableBaseId\": \"CONFIGURAR_BASE_ID\",\n  \"videosTableId\": \"CONFIGURAR_TABLA_VIDEOS\",\n  \"audiosTableId\": \"CONFIGURAR_TABLA_AUDIOS\",\n  \"heygenBaseUrl\": \"https://api.heygen.com/v3\",\n  \"avatarId\": \"CONFIGURAR_AVATAR_ID\",\n  \"voiceId\": \"CONFIGURAR_VOICE_ID\",\n  \"resolution\": \"1080p\",\n  \"aspectRatio\": \"auto\",\n  \"generationEnabled\": false,\n  \"maxRecordsPerRun\": 1,\n  \"maxPolls\": 60,\n  \"pollIntervalSeconds\": 15,\n  \"slackBaseUrl\": \"https://slack.com/api\",\n  \"slackVideosChannel\": \"CONFIGURAR_CANAL_VIDEOS\",\n  \"slackAudioChannel\": \"CONFIGURAR_CANAL_AUDIOS\",\n  \"slackErrorsChannel\": \"CONFIGURAR_CANAL_ERRORES\",\n  \"transcriptionBaseUrl\": \"https://api.groq.com/openai/v1\",\n  \"transcriptionModel\": \"whisper-large-v3-turbo\",\n  \"maxAudioBytes\": 20971520,\n  \"allowLocalMock\": false\n};\ntry { return { json: {cfg: validateConfig(cfg, 'audio'), action:'validate'}, binary:$input.item.binary }; }\ncatch { return {json:{action:'invalid',responseCode:503,message:'La automatización todavía no está configurada.'}}; }"
+      }
+    },
+    {
+      "id": "proyectOneAudio-3",
+      "name": "Configuracion lista",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'validate' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneAudio-4",
+      "name": "Validar archivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -120
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function validateAudioMetadata(input, sizeBytes, cfg) {\n  const requestId = String(input.json?.body?.request_id || '');\n  const keys = Object.keys(input.binary || {});\n  const file = input.binary?.audio;\n  const base = { cfg, requestId };\n  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId)) return { ...base, action: 'invalid', responseCode: 400, message: 'Enviá request_id: entre 8 y 128 letras, números, guiones o guiones bajos.' };\n  if (keys.length !== 1 || !file) return { ...base, action: 'invalid', responseCode: 400, message: 'Enviá un solo archivo en el campo multipart audio.' };\n  if (!Number.isInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > cfg.maxAudioBytes) return { ...base, action: 'invalid', responseCode: 413, message: 'El audio debe tener contenido y pesar como máximo 20 MiB.' };\n  if (!/\\.(flac|mp3|mp4|mpeg|mpga|m4a|ogg|wav|webm)$/i.test(file.fileName || '')) return { ...base, action: 'invalid', responseCode: 415, message: 'Formato de audio no admitido.' };\n  if (!/^(audio\\/|video\\/|application\\/octet-stream)/i.test(file.mimeType || '')) return { ...base, action: 'invalid', responseCode: 415, message: 'El tipo de archivo no corresponde a audio o video.' };\n  return { ...base, action: 'lookup' };\n}\n\nconst original = $('Recibir audio').first();\nconst keys = Object.keys(original.binary || {});\nconst normalized = { json: original.json, binary: keys.length === 1 && /^(audio|audio0)$/.test(keys[0]) ? { audio: original.binary[keys[0]] } : original.binary };\nlet size = 0;\nif (normalized.binary?.audio && keys.length === 1) {\n  try { size = (await this.helpers.getBinaryDataBuffer(0, keys[0])).length; }\n  catch { return {json:{cfg:$json.cfg, action:'invalid',responseCode:400,message:'No se pudo leer el archivo de audio.'}}; }\n}\nreturn {json:validateAudioMetadata(normalized,size,$json.cfg),binary:normalized.binary};"
+      }
+    },
+    {
+      "id": "proyectOneAudio-5",
+      "name": "Archivo valido",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'lookup' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneAudio-6",
+      "name": "Buscar solicitud existente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1100,
+        -240
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.cfg.airtableBaseUrl + '/' + encodeURIComponent($json.cfg.airtableBaseId) + '/' + encodeURIComponent($json.cfg.audiosTableId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "maxRecords",
+              "value": "1"
+            },
+            {
+              "name": "filterByFormula",
+              "value": "={{ \"{SolicitudID}='\" + $json.requestId + \"'\" }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_AIRTABLE",
+          "name": "Proyect One - Airtable"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "proyectOneAudio-7",
+      "name": "Comprobar solicitud",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -240
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function audioLookupResult(response, ctx) {\n  if (!responseOk(response) || !Array.isArray(response.body?.records)) return { ...ctx, action: 'error', responseCode: 502, message: 'No se pudo comprobar request_id en Airtable.' };\n  const records = response.body.records;\n  if (records.length) {\n    const record = records[0];\n    return { ...ctx, action: 'duplicate', responseCode: 200, recordId: record.id, fields: record.fields, duplicate: true, message: 'Este request_id ya está guardado. No se volvió a transcribir.' };\n  }\n  return { ...ctx, action: 'transcribe' };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: audioLookupResult($json, $(\"Validar archivo\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneAudio-8",
+      "name": "Solicitud nueva",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        -240
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'transcribe' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneAudio-9",
+      "name": "Solicitud ya guardada",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'duplicate' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneAudio-10",
+      "name": "Recuperar archivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -400
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\n\nreturn {json:$json,binary:$('Validar archivo').item.binary};"
+      }
+    },
+    {
+      "id": "proyectOneAudio-11",
+      "name": "Transcribir audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1980,
+        -400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.cfg.transcriptionBaseUrl + '/audio/transcriptions' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "audio"
+            },
+            {
+              "name": "model",
+              "value": "={{ $json.cfg.transcriptionModel }}"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            },
+            {
+              "name": "temperature",
+              "value": "0"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_TRANSCRIPCION",
+          "name": "Proyect One - Transcripcion"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "proyectOneAudio-12",
+      "name": "Preparar transcripcion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -400
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function makeAudioRecord(response, ctx, now) {\n  const text = response.body?.text;\n  if (!responseOk(response) || typeof text !== 'string' || !text.trim()) return { ...ctx, action: 'error', responseCode: 502, message: 'El servicio no devolvió una transcripción válida.' };\n  if (text.length > 90000) return { ...ctx, action: 'error', responseCode: 422, message: 'La transcripción supera el tamaño que este flujo guarda en Airtable.' };\n  const clean = text.trim();\n  const cut = (value, max) => { const chars = Array.from(value); return chars.length <= max ? value : chars.slice(0, max - 3).join('') + '...'; };\n  const title = cut(clean, 50);\n  const fields = { SolicitudID: ctx.requestId, Titulo: title, Descripcion: cut(clean, 200), PromptVideo: 'Crea un video educativo basado en este contenido: ' + title + '. Enfócate en los puntos principales.', FormatoVideo: 'MP4', TranscripcionOriginal: clean, FechaCreacion: now };\n  return { ...ctx, action: 'save', fields, requestBody: { fields } };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: makeAudioRecord($json, $(\"Comprobar solicitud\").item.json, new Date().toISOString()) };"
+      }
+    },
+    {
+      "id": "proyectOneAudio-13",
+      "name": "Transcripcion valida",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2420,
+        -400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'save' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneAudio-14",
+      "name": "Guardar transcripcion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2640,
+        -560
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.cfg.airtableBaseUrl + '/' + encodeURIComponent($json.cfg.airtableBaseId) + '/' + encodeURIComponent($json.cfg.audiosTableId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_AIRTABLE",
+          "name": "Proyect One - Airtable"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "proyectOneAudio-15",
+      "name": "Comprobar guardado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -560
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function audioPersistResult(response, ctx) {\n  if (!responseOk(response) || !response.body?.id || response.body?.fields?.SolicitudID !== ctx.requestId) return { ...ctx, action: 'error', responseCode: 502, message: 'No se confirmó el guardado en Airtable. Antes de reenviar, buscá request_id en la tabla para evitar un duplicado.' };\n  const excerptChars = Array.from(ctx.fields.TranscripcionOriginal);\n  const excerpt = excerptChars.slice(0, 100).join('') + (excerptChars.length > 100 ? '...' : '');\n  return { ...ctx, action: 'notify', responseCode: 200, recordId: response.body.id, message: 'Audio transcrito y guardado.', notice: { channel: ctx.cfg.slackAudioChannel, text: 'Audio transcrito y guardado.\\nSolicitud: ' + ctx.requestId + '\\nRegistro: ' + response.body.id + '\\nTranscripción (extracto): ' + excerpt, mrkdwn: false, parse: 'none', unfurl_links: false, unfurl_media: false } };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: audioPersistResult($json, $(\"Preparar transcripcion\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneAudio-16",
+      "name": "Transcripcion guardada",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
+        -560
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'notify' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneAudio-17",
+      "name": "Avisar audio por Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3300,
+        -700
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.cfg.slackBaseUrl + '/chat.postMessage' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.notice }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_SLACK",
+          "name": "Proyect One - Slack"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "proyectOneAudio-18",
+      "name": "Comprobar aviso de audio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        -700
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function audioNotificationResult(response, ctx) {\n  return { ...ctx, notified: responseOk(response) && response.body?.ok === true };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: audioNotificationResult($json, $(\"Comprobar guardado\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneAudio-19",
+      "name": "Preparar aviso de error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        120
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function audioErrorNotice(ctx) {\n  return { ...ctx, notice: { channel: ctx.cfg.slackErrorsChannel, text: 'No se pudo completar la transcripción.\\nSolicitud: ' + ctx.requestId + '\\n' + ctx.message, mrkdwn: false, parse: 'none', unfurl_links: false, unfurl_media: false } };\n}\n\nreturn { json: audioErrorNotice($json) };"
+      }
+    },
+    {
+      "id": "proyectOneAudio-20",
+      "name": "Avisar error por Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3080,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.cfg.slackBaseUrl + '/chat.postMessage' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.notice }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_SLACK",
+          "name": "Proyect One - Slack"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "proyectOneAudio-21",
+      "name": "Conservar error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        120
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\n\nreturn { json: $(\"Preparar aviso de error\").item.json };"
+      }
+    },
+    {
+      "id": "proyectOneAudio-22",
+      "name": "Preparar respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        -100
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function audioResponse(ctx) {\n  if (ctx.responseCode >= 400) return { ok: false, request_id: ctx.requestId || null, message: ctx.message };\n  return { ok: true, request_id: ctx.requestId, record_id: ctx.recordId, duplicate: ctx.duplicate === true, transcription: ctx.fields?.TranscripcionOriginal || '', title: ctx.fields?.Titulo || '', notified: ctx.notified ?? null, message: ctx.message };\n}\n\nreturn { json: { responseCode:$json.responseCode || 500, body:audioResponse($json) } };"
+      }
+    },
+    {
+      "id": "proyectOneAudio-23",
+      "name": "Responder solicitud",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        3960,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body }}",
+        "options": {
+          "responseCode": "={{ $json.responseCode }}"
+        }
+      }
+    },
+    {
+      "id": "proyectOneAudio-24",
+      "name": "Antes de activar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -500
+      ],
+      "parameters": {
+        "content": "## Entrada\nPOST multipart/form-data con un solo archivo audio y request_id (8–128 letras/números/_/-).\nCredencial Header Auth obligatoria: X-Proyect-One-Key.\n20 MiB como máximo; servidor/proxy deben aceptar ese tamaño.\nProveedor inicial Groq whisper-large-v3-turbo. No hay conversión ni extracción de audio.\nUna solicitud a la vez; request_id evita repetir las ya guardadas, no es un bloqueo concurrente.",
+        "height": 330,
+        "width": 520
+      }
+    }
+  ],
+  "connections": {
+    "Recibir audio": {
+      "main": [
+        [
+          {
+            "node": "Configuracion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuracion": {
+      "main": [
+        [
+          {
+            "node": "Configuracion lista",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuracion lista": {
+      "main": [
+        [
+          {
+            "node": "Validar archivo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar archivo": {
+      "main": [
+        [
+          {
+            "node": "Archivo valido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archivo valido": {
+      "main": [
+        [
+          {
+            "node": "Buscar solicitud existente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar solicitud existente": {
+      "main": [
+        [
+          {
+            "node": "Comprobar solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar solicitud": {
+      "main": [
+        [
+          {
+            "node": "Solicitud nueva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solicitud nueva": {
+      "main": [
+        [
+          {
+            "node": "Recuperar archivo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Solicitud ya guardada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solicitud ya guardada": {
+      "main": [
+        [
+          {
+            "node": "Preparar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar aviso de error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recuperar archivo": {
+      "main": [
+        [
+          {
+            "node": "Transcribir audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribir audio": {
+      "main": [
+        [
+          {
+            "node": "Preparar transcripcion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar transcripcion": {
+      "main": [
+        [
+          {
+            "node": "Transcripcion valida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcripcion valida": {
+      "main": [
+        [
+          {
+            "node": "Guardar transcripcion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar aviso de error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar transcripcion": {
+      "main": [
+        [
+          {
+            "node": "Comprobar guardado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar guardado": {
+      "main": [
+        [
+          {
+            "node": "Transcripcion guardada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcripcion guardada": {
+      "main": [
+        [
+          {
+            "node": "Avisar audio por Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar aviso de error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar audio por Slack": {
+      "main": [
+        [
+          {
+            "node": "Comprobar aviso de audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar aviso de audio": {
+      "main": [
+        [
+          {
+            "node": "Preparar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar aviso de error": {
+      "main": [
+        [
+          {
+            "node": "Avisar error por Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar error por Slack": {
+      "main": [
+        [
+          {
+            "node": "Conservar error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conservar error": {
+      "main": [
+        [
+          {
+            "node": "Preparar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar respuesta": {
+      "main": [
+        [
+          {
+            "node": "Responder solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": false,
+    "timezone": "America/Argentina/Buenos_Aires",
+    "executionTimeout": 7200
+  },
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

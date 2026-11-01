@@ -1,98 +1,74 @@
-# Proyect One · Diseño de automatización audiovisual
+# Proyect One · Videos y audio con n8n
 
-Este repositorio reúne el diseño de dos flujos: uno para generar videos a partir de datos de Airtable y otro para transcribir archivos de audio. En ambos casos, la idea es guardar los resultados en Airtable y enviar avisos por Slack. Para el video se plantea usar HeyGen; el servicio de transcripción todavía está por definir.
+Este proyecto organiza dos tareas: pedir videos a HeyGen a partir de registros de Airtable y convertir archivos de audio en texto. Los resultados quedan en Airtable y los avisos llegan a Slack.
 
-También incluye una página HTML con un texto de privacidad pendiente de revisión. Todavía no está confirmado que describa el funcionamiento de una aplicación real.
+Son dos flujos separados. Transcribir un audio no genera un video automáticamente.
 
-**Estado de lo publicado:** el JSON describe los pasos y los datos previstos. La implementación ejecutable en n8n no está incluida.
+## Por dónde empezar
 
-[Explorar el diseño](agente%20ia%20videos.json) · [Ver la página de privacidad](https://rashidzuain.github.io/privacidad-proyect-one/)
+- [Configurá las cuentas e importá los flujos](docs/puesta-en-marcha.md).
+- [Prepará las tablas de Airtable](docs/airtable.md).
+- [Revisá las comprobaciones y sus límites](docs/validacion.md).
 
-## Qué incluye
+Los JSON de n8n se entregan sin activar y sin claves. Para trabajar con tus cuentas, hay que vincular las credenciales y completar el nodo `Configuracion`. La generación de videos empieza deshabilitada; la habilitás cuando decidas hacer una llamada real a HeyGen.
 
-| Archivo | Qué vas a encontrar |
-| --- | --- |
-| [`agente ia videos.json`](agente%20ia%20videos.json) | La especificación de los dos flujos: operaciones, campos, conexiones y avisos de error. |
-| [`index.html`](index.html) | La página estática con el texto de privacidad y su estado de revisión. |
-| [`LICENSE`](LICENSE) | La licencia MIT. |
+## Qué hace cada flujo
 
-## Los dos flujos
+### Videos desde Airtable
 
-El siguiente esquema resume el recorrido previsto. Son dos flujos independientes:
+[`01-videos-airtable-heygen.json`](workflows/01-videos-airtable-heygen.json) se inicia manualmente. Lee los registros pendientes, procesa uno por vez y guarda el identificador de HeyGen antes de consultar el resultado. Cuando el video está listo, actualiza el registro y avisa por Slack.
 
-```mermaid
-flowchart LR
-    V1["1. Videos: leer Airtable"] --> V2["Solicitar video a HeyGen"]
-    V2 --> V3["Guardar ID, esperar y consultar URL"]
-    V3 --> V4["Actualizar Airtable y avisar por Slack"]
-```
+También consulta videos que ya están `En Proceso`. Si se corta la espera, podés volver a consultar el mismo ID en otra ejecución, sin pedir un video nuevo. Hay un límite de consultas para que la espera no quede abierta.
 
 ```mermaid
 flowchart LR
-    A1["2. Audio: recibir por webhook"] --> A2["Guardar archivo temporal y transcribir"]
-    A2 --> A3["Preparar título, descripción y prompt"]
-    A3 --> A4["Guardar en Airtable y avisar por Slack"]
+    A["Leer Airtable"] --> B["Crear o reanudar video"]
+    B --> C["Consultar HeyGen"]
+    C --> D["Guardar resultado y avisar"]
 ```
 
-### 1. De Airtable a un video con HeyGen
+### Audio recibido por webhook
 
-El primer flujo está pensado para iniciarse manualmente y seguir estos pasos:
+[`02-audio-a-airtable.json`](workflows/02-audio-a-airtable.json) recibe un archivo autenticado, lo transcribe con Groq y guarda el texto en Airtable. Devuelve una respuesta al cliente y envía el aviso por Slack.
 
-1. Leer los registros de Airtable cuyo estado sea `Pendiente`.
-2. Enviar el título y la descripción a HeyGen, con un avatar y una voz que hay que configurar.
-3. Guardar el identificador del video y cambiar el estado del registro a `En Proceso`.
-4. Esperar y consultar la URL del video.
-5. Guardar esa URL en Airtable, marcar el registro como `Completado` y enviar un aviso por Slack.
+Cada envío lleva un `request_id`. Si ese ID ya está guardado, el flujo recupera el registro antes de volver a transcribir. El título y la descripción se obtienen recortando la transcripción; no son resúmenes redactados por otro modelo.
 
-El diseño también incluye avisos de error para las solicitudes a HeyGen.
+```mermaid
+flowchart LR
+    A["Recibir audio y request_id"] --> B["Buscar envío anterior"]
+    B --> C["Transcribir si es nuevo"]
+    C --> D["Guardar, avisar y responder"]
+```
 
-### 2. De un audio a una transcripción en Airtable
+La comprobación de IDs cubre reintentos secuenciales. No reemplaza un bloqueo entre ejecuciones simultáneas. La [guía de operación](docs/operacion.md) explica esa limitación y cómo revisar una ejecución que quedó a mitad de camino.
 
-El segundo flujo está pensado para recibir un archivo de audio a través de un webhook:
+## Qué se conserva del diseño inicial
 
-1. Guardar temporalmente el archivo recibido.
-2. Enviarlo a una API de transcripción, que todavía hay que configurar.
-3. Preparar un título y una descripción a partir de recortes del texto transcrito, junto con un prompt de video.
-4. Guardar esos campos y la transcripción original en Airtable.
-5. Enviar un aviso de resultado o error por Slack.
+[`agente ia videos.json`](agente%20ia%20videos.json) sigue en el repositorio como referencia. Describe la idea original; los archivos de `workflows/` son los que se importan en n8n.
 
-El archivo actual describe cada flujo por separado. No conecta automáticamente la transcripción con la generación de video, ni incluye la descarga de videos o la extracción de su audio.
+La implementación mantiene Airtable, HeyGen y Slack. Para transcribir se eligió Groq con `whisper-large-v3-turbo`. Las rutas de HeyGen se actualizaron a su API v3 y la resolución se configura aparte del formato MP4.
 
-### Un ejemplo para entender el recorrido
+El [detalle del diseño](docs/diseno-original.md) conserva sus campos, el ejemplo de lectura y las decisiones que estaban abiertas. No se agregó descarga de videos, extracción de su audio ni conexión automática entre los dos flujos.
 
-**Este ejemplo es hipotético; no representa una ejecución comprobada.** Un registro de Airtable podría tener `Titulo = "Tres ideas para organizar el estudio"`, una explicación en `Descripcion` y `Estado = "Pendiente"`. El primer flujo usaría esos datos para solicitar un video y, después de consultar su resultado, guardar `HeyGen_VideoID` y `URL_VideoGenerado`.
+## Desarrollo y comprobaciones
 
-Por separado, el segundo flujo podría recibir un audio con esa explicación y guardar su texto en `TranscripcionOriginal`, junto con `Titulo`, `Descripcion` y `PromptVideo`. Ese registro no pasa automáticamente al flujo de video en el diseño publicado.
+Para regenerar los JSON y correr las pruebas locales, con Node.js 22 o posterior:
 
-## Cómo explorar el proyecto
+```sh
+npm run verify
+```
 
-- Abrí [`index.html`](index.html) en un navegador o visitá la [página publicada](https://rashidzuain.github.io/privacidad-proyect-one/).
-- Revisá [`agente ia videos.json`](agente%20ia%20videos.json) para ver los pasos, las expresiones y los campos previstos.
+El [registro de validación](docs/validacion.md) distingue las pruebas locales, la compatibilidad con n8n y lo que falta comprobar con servicios reales. Una simulación no prueba los permisos, los créditos ni la configuración de tus cuentas.
 
-El JSON usa una estructura descriptiva propia, con claves como `workflow_name`, `flows`, `node_type` y `configuration`. **No es una exportación nativa de n8n lista para importar.** Para ejecutarlo, hay que construir los nodos y sus conexiones en n8n y configurar las integraciones.
+**Tecnologías:** n8n, Airtable, HeyGen, Groq, Slack, HTTP/JSON, JavaScript y HTML. Las [referencias oficiales](docs/referencias.md) reúnen las APIs y las condiciones de los servicios que conviene consultar al configurar.
 
-## Qué falta para ejecutar este diseño
+## Página de privacidad
 
-Estos son los puntos que quedan por resolver para pasar de la descripción a una implementación comprobable:
-
-- Crear una exportación nativa de n8n para cada flujo.
-- Configurar las credenciales, bases y tablas de Airtable; el avatar y la voz de HeyGen; los canales de Slack; y el proveedor de transcripción.
-- Validar los endpoints, los formatos de solicitud y las respuestas de cada servicio.
-- Revisar cómo se conservan los identificadores de Airtable entre pasos y cómo se manejan los archivos binarios.
-- Incorporar la comprobación del estado del video, los reintentos y la respuesta del webhook.
-- Documentar una ejecución de ejemplo con datos de prueba y resultados reproducibles.
-
-Los valores `YOUR_..._HERE` son marcadores que hay que reemplazar al configurar las integraciones. El repositorio no incluye pruebas de ejecución de extremo a extremo.
-
-## Tecnologías presentes en el diseño
-
-**n8n · Airtable · HeyGen · Slack · HTTP/JSON · JavaScript · HTML**
-
-El proveedor de transcripción todavía está por elegir. Los servicios mencionados en el JSON son ejemplos, no una integración ya implementada.
+[`index.html`](index.html) contiene un texto pendiente de revisión. Todavía no está confirmado que describa el funcionamiento de una aplicación real. Podés abrir el archivo o visitar la [página publicada](https://rashidzuain.github.io/privacidad-proyect-one/).
 
 ## Aportes
 
-Si encontrás algo para corregir o tenés una idea para llevar el diseño a una implementación, podés abrir un issue. También podés enviar un pull request contando qué cambiaste y cómo lo comprobaste. Las sugerencias y correcciones son bienvenidas.
+Si encontrás un problema, abrí un issue contando qué intentaste y qué pasó. Para proponer un cambio, enviá un pull request con una explicación breve y la forma en que lo comprobaste.
 
 ## Licencia
 

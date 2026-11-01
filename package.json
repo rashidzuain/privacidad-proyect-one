@@ -1,0 +1,16 @@
+{
+  "name": "proyect-one-workflows",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Flujos n8n de Proyect One y sus verificaciones locales",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-workflows.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "verify": "npm run build && npm test",
+    "verify:n8n-import": "node scripts/verify-n8n-import.mjs",
+    "verify:n8n-mocks": "node scripts/verify-n8n-mocks.mjs",
+    "verify:n8n-audio": "node scripts/verify-n8n-audio.mjs"
+  },
+  "engines": { "node": ">=22" }
+}

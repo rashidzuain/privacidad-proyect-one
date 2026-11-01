@@ -1,0 +1,10 @@
+node_modules/
+.n8n/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.log
+.test-output/
+coverage/
