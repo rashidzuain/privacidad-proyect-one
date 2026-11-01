@@ -1,0 +1,1374 @@
+{
+  "name": "Proyect One - Videos de Airtable a HeyGen",
+  "active": false,
+  "nodes": [
+    {
+      "id": "proyectOneVideos-1",
+      "name": "Iniciar manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "proyectOneVideos-2",
+      "name": "Configuracion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function validateConfig(cfg, mode = 'video') {\n  const required = mode === 'video'\n    ? ['airtableBaseId', 'videosTableId', 'slackVideosChannel', 'slackErrorsChannel']\n    : ['airtableBaseId', 'audiosTableId', 'slackAudioChannel', 'slackErrorsChannel', 'transcriptionModel'];\n  for (const key of required) {\n    if (typeof cfg[key] !== 'string' || !cfg[key].trim() || /CONFIGURAR/.test(cfg[key])) {\n      throw new Error('Configurá el campo ' + key + ' en el nodo Configuracion.');\n    }\n  }\n  const allowed = {\n    airtableBaseUrl: 'https://api.airtable.com/v0',\n    heygenBaseUrl: 'https://api.heygen.com/v3',\n    slackBaseUrl: 'https://slack.com/api',\n    transcriptionBaseUrl: 'https://api.groq.com/openai/v1',\n  };\n  for (const [key, expected] of Object.entries(allowed)) {\n    if (mode === 'video' && key === 'transcriptionBaseUrl') continue;\n    if (mode === 'audio' && key === 'heygenBaseUrl') continue;\n    const value = cfg[key];\n    const localMock = cfg.allowLocalMock === true && /^http:\\/\\/127\\.0\\.0\\.1:\\d+(?:\\/[^?#]*)?$/.test(value);\n    const alternative = key === 'transcriptionBaseUrl' && value === 'https://api.openai.com/v1';\n    if (value !== expected && !alternative && !localMock) throw new Error('URL no permitida: ' + key);\n  }\n  if (mode === 'video') {\n    if (typeof cfg.generationEnabled !== 'boolean') throw new Error('generationEnabled debe ser true o false.');\n    if (!Number.isInteger(cfg.maxPolls) || cfg.maxPolls < 1 || cfg.maxPolls > 120) throw new Error('maxPolls debe estar entre 1 y 120.');\n    if (!Number.isInteger(cfg.pollIntervalSeconds) || cfg.pollIntervalSeconds < 1 || cfg.pollIntervalSeconds > 300) throw new Error('pollIntervalSeconds debe estar entre 1 y 300.');\n    if (!Number.isInteger(cfg.maxRecordsPerRun) || cfg.maxRecordsPerRun < 0) throw new Error('maxRecordsPerRun debe ser 0 o un entero positivo.');\n    if (!['720p', '1080p'].includes(cfg.resolution)) throw new Error('resolution debe ser 720p o 1080p.');\n    if (!['auto', '16:9', '9:16', '1:1', '4:5', '5:4'].includes(cfg.aspectRatio)) throw new Error('aspectRatio no admitido.');\n    if (cfg.generationEnabled && (!cfg.avatarId || !cfg.voiceId || /CONFIGURAR/.test(cfg.avatarId + cfg.voiceId))) throw new Error('Configurá avatarId y voiceId antes de permitir generación.');\n  }\n  if (mode === 'audio' && (!Number.isInteger(cfg.maxAudioBytes) || cfg.maxAudioBytes < 1 || cfg.maxAudioBytes > 20 * 1024 * 1024)) throw new Error('maxAudioBytes debe estar entre 1 y 20971520.');\n  return { ...cfg };\n}\n\nconst cfg = {\n  \"airtableBaseUrl\": \"https://api.airtable.com/v0\",\n  \"airtableBaseId\": \"CONFIGURAR_BASE_ID\",\n  \"videosTableId\": \"CONFIGURAR_TABLA_VIDEOS\",\n  \"audiosTableId\": \"CONFIGURAR_TABLA_AUDIOS\",\n  \"heygenBaseUrl\": \"https://api.heygen.com/v3\",\n  \"avatarId\": \"CONFIGURAR_AVATAR_ID\",\n  \"voiceId\": \"CONFIGURAR_VOICE_ID\",\n  \"resolution\": \"1080p\",\n  \"aspectRatio\": \"auto\",\n  \"generationEnabled\": false,\n  \"maxRecordsPerRun\": 1,\n  \"maxPolls\": 60,\n  \"pollIntervalSeconds\": 15,\n  \"slackBaseUrl\": \"https://slack.com/api\",\n  \"slackVideosChannel\": \"CONFIGURAR_CANAL_VIDEOS\",\n  \"slackAudioChannel\": \"CONFIGURAR_CANAL_AUDIOS\",\n  \"slackErrorsChannel\": \"CONFIGURAR_CANAL_ERRORES\",\n  \"transcriptionBaseUrl\": \"https://api.groq.com/openai/v1\",\n  \"transcriptionModel\": \"whisper-large-v3-turbo\",\n  \"maxAudioBytes\": 20971520,\n  \"allowLocalMock\": false\n};\nreturn { json: validateConfig(cfg, 'video') };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-3",
+      "name": "Leer videos de Airtable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $(\"Configuracion\").first().json.airtableBaseUrl + '/' + encodeURIComponent($(\"Configuracion\").first().json.airtableBaseId) + '/' + encodeURIComponent($(\"Configuracion\").first().json.videosTableId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "offset",
+                    "value": "={{ $response.body.offset || undefined }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.offset || $response.statusCode >= 400 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 1000,
+              "requestInterval": 250
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "pageSize",
+              "value": "100"
+            },
+            {
+              "name": "filterByFormula",
+              "value": "OR({Estado}='Pendiente',{Estado}='En Proceso')"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_AIRTABLE",
+          "name": "Proyect One - Airtable"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "proyectOneVideos-4",
+      "name": "Reunir registros",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function flattenAirtablePages(pages, cfg) {\n  const records = [];\n  const seen = new Set();\n  for (const page of pages) {\n    if (!responseOk(page) || !Array.isArray(page.body?.records)) throw new Error('No se pudo leer Airtable. Revisá credencial, base y tabla.');\n    for (const record of page.body.records) {\n      if (!record?.id || seen.has(record.id)) continue;\n      seen.add(record.id);\n      records.push(record);\n    }\n  }\n  // Reaching a configured pagination cap must never look like a complete scan.\n  if (pages.at(-1)?.body?.offset) throw new Error('La lectura de Airtable quedó incompleta; no se procesó ningún registro.');\n  const selected = cfg.maxRecordsPerRun === 0 ? records : records.slice(0, cfg.maxRecordsPerRun);\n  return selected.length ? selected : [{ empty: true }];\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn flattenAirtablePages($input.all().map(item => item.json), $(\"Configuracion\").first().json).map((record) => ({ json: record }));"
+      }
+    },
+    {
+      "id": "proyectOneVideos-5",
+      "name": "Procesar de a uno",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-6",
+      "name": "Regular ritmo de Airtable",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        100
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "webhookId": "1a5dfe1d-8ee0-4e51-85d5-eaf0f111b003"
+    },
+    {
+      "id": "proyectOneVideos-7",
+      "name": "Resumen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n\nconst rows = $input.all().map(item => item.json);\nreturn [{ json: { total: rows.filter(r => r.outcome !== 'empty').length, results: rows.map(r => ({ recordId: r.recordId || null, videoId: r.videoId || null, outcome: r.outcome, message: r.message, notified: r.notified ?? null })) } }];"
+      }
+    },
+    {
+      "id": "proyectOneVideos-8",
+      "name": "Preparar registro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function prepareVideoRecord(record, cfg) {\n  if (record.empty) return { cfg, action: 'skip', outcome: 'empty', message: 'No hay videos pendientes.' };\n  const f = record.fields || {};\n  const ctx = { cfg, recordId: record.id, title: String(f.Titulo || '').trim(), script: String(f.Descripcion || '').trim(), videoId: String(f.HeyGen_VideoID || '').trim(), state: f.Estado, pollAttempt: 0 };\n  if (!/^rec[a-zA-Z0-9]+$/.test(ctx.recordId)) return { ...ctx, action: 'error', outcome: 'invalid', message: 'El identificador de Airtable no es válido.' };\n  if (ctx.videoId) {\n    if (!/^[a-zA-Z0-9_-]+$/.test(ctx.videoId)) return { ...ctx, action: 'error', outcome: 'invalid', message: 'Revisá el identificador de HeyGen.' };\n    return { ...ctx, action: 'poll' };\n  }\n  if (f.Estado === 'En Proceso') return { ...ctx, action: 'error', outcome: 'manual_review', message: 'El registro está En Proceso sin ID de video. Revisá HeyGen antes de cambiarlo a Pendiente.' };\n  if (f.Estado !== 'Pendiente') return { ...ctx, action: 'skip', outcome: 'skipped', message: 'Estado no procesable.' };\n  if (!ctx.title || !ctx.script || ctx.script.length > 10000) return { ...ctx, action: 'error', outcome: 'invalid', message: 'Completá Titulo y Descripcion (hasta 10000 caracteres de guion).' };\n  if (!cfg.generationEnabled) return { ...ctx, action: 'skip', outcome: 'generation_disabled', message: 'La generación está deshabilitada en Configuracion.' };\n  return { ...ctx, action: 'create', requestBody: { fields: { Estado: 'En Proceso' } } };\n}\n\nreturn { json: prepareVideoRecord($json, $(\"Configuracion\").first().json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-9",
+      "name": "Necesita generar",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'create' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-10",
+      "name": "Puede consultar video",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        340
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'poll' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-11",
+      "name": "Requiere aviso inicial",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        540
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'error' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-12",
+      "name": "Reservar registro en Airtable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1760,
+        -180
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.cfg.airtableBaseUrl + '/' + encodeURIComponent($json.cfg.airtableBaseId) + '/' + encodeURIComponent($json.cfg.videosTableId) + '/' + encodeURIComponent($json.recordId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_AIRTABLE",
+          "name": "Proyect One - Airtable"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "proyectOneVideos-13",
+      "name": "Comprobar reserva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -180
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function claimResult(response, ctx) {\n  if (!responseOk(response) || response.body?.id !== ctx.recordId || response.body?.fields?.Estado !== 'En Proceso') return { ...ctx, action: 'error', outcome: 'claim_failed', message: 'No se confirmó la reserva en Airtable. No se solicitó ningún video.' };\n  return { ...ctx, claimed: true, action: 'create', requestBody: { type: 'avatar', avatar_id: ctx.cfg.avatarId, script: ctx.script, voice_id: ctx.cfg.voiceId, title: ctx.title, resolution: ctx.cfg.resolution, aspect_ratio: ctx.cfg.aspectRatio, output_format: 'mp4' } };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: claimResult($json, $(\"Preparar registro\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-14",
+      "name": "Reserva confirmada",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        -180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'create' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-15",
+      "name": "Solicitar video a HeyGen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2420,
+        -300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.cfg.heygenBaseUrl + '/videos' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_HEYGEN",
+          "name": "Proyect One - HeyGen"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "proyectOneVideos-16",
+      "name": "Comprobar creacion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function generationResult(response, ctx) {\n  const id = response.body?.data?.video_id;\n  if (!responseOk(response) || typeof id !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(id)) return { ...ctx, action: 'error', outcome: 'manual_review', message: 'No se confirmó el resultado de la creación. No vuelvas a generar: revisá el registro en HeyGen.' };\n  return { ...ctx, videoId: id, action: 'persist', requestBody: { fields: { Estado: 'En Proceso', HeyGen_VideoID: id } } };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: generationResult($json, $(\"Comprobar reserva\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-17",
+      "name": "HeyGen devolvio ID",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2860,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'persist' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-18",
+      "name": "Guardar ID antes de consultar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3080,
+        -420
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.cfg.airtableBaseUrl + '/' + encodeURIComponent($json.cfg.airtableBaseId) + '/' + encodeURIComponent($json.cfg.videosTableId) + '/' + encodeURIComponent($json.recordId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_AIRTABLE",
+          "name": "Proyect One - Airtable"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "proyectOneVideos-19",
+      "name": "Comprobar ID guardado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -420
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function persistedVideoResult(response, ctx) {\n  if (!responseOk(response) || response.body?.id !== ctx.recordId || response.body?.fields?.HeyGen_VideoID !== ctx.videoId) return { ...ctx, action: 'error', outcome: 'manual_review', message: 'HeyGen aceptó el video pero Airtable no confirmó su ID. Recuperá el ID de esta ejecución y guardalo antes de reintentar.' };\n  return { ...ctx, action: 'poll' };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: persistedVideoResult($json, $(\"Comprobar creacion\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-20",
+      "name": "ID guardado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3520,
+        -420
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'poll' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-21",
+      "name": "Preparar consulta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function preparePoll(ctx) {\n  return { ...ctx, pollAttempt: ctx.pollAttempt + 1 };\n}\n\nreturn { json: preparePoll($json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-22",
+      "name": "Consultar estado en HeyGen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3960,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.cfg.heygenBaseUrl + '/videos/' + encodeURIComponent($json.videoId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_HEYGEN",
+          "name": "Proyect One - HeyGen"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "proyectOneVideos-23",
+      "name": "Interpretar estado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function interpretVideoStatus(response, ctx) {\n  if (!responseOk(response)) return { ...ctx, action: 'error', outcome: 'status_unavailable', message: 'No se pudo consultar HeyGen. El ID guardado permite reanudar en otra ejecución.' };\n  const data = response.body?.data || {};\n  if (data.status === 'completed') {\n    const url = data.video_url;\n    if (typeof url !== 'string' || !/^https:\\/\\/(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?::\\d{1,5})?(?:[/?#][^\\s<>\"\\\\]*)?$/i.test(url)) return { ...ctx, action: 'error', outcome: 'invalid_url', message: 'HeyGen informó finalización sin una URL HTTPS válida.' };\n    return { ...ctx, action: 'complete', videoUrl: url, requestBody: { fields: { Estado: 'Completado', URL_VideoGenerado: url } } };\n  }\n  if (data.status === 'failed') return { ...ctx, action: 'failed', outcome: 'provider_failed', message: 'HeyGen informó que la generación falló. Revisá el detalle en su panel.', requestBody: { fields: { Estado: 'Error' } } };\n  if (!['pending', 'processing'].includes(data.status)) return { ...ctx, action: 'error', outcome: 'unknown_status', message: 'HeyGen devolvió un estado no reconocido.' };\n  if (ctx.pollAttempt >= ctx.cfg.maxPolls) return { ...ctx, action: 'error', outcome: 'poll_timeout', message: 'Se alcanzó el límite de consultas. El registro queda En Proceso para reanudar sin crear otro video.' };\n  return { ...ctx, action: 'wait' };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: interpretVideoStatus($json, $(\"Preparar consulta\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-24",
+      "name": "Video terminado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4400,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'complete' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-25",
+      "name": "Todavia procesando",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4620,
+        240
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'wait' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-26",
+      "name": "Esperar antes de consultar",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4840,
+        100
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ $json.cfg.pollIntervalSeconds }}",
+        "unit": "seconds"
+      },
+      "webhookId": "1a5dfe1d-8ee0-4e51-85d5-eaf0f111b001"
+    },
+    {
+      "id": "proyectOneVideos-27",
+      "name": "HeyGen informo fallo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4840,
+        420
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'failed' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "proyectOneVideos-28",
+      "name": "Marcar error de generacion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        5060,
+        320
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.cfg.airtableBaseUrl + '/' + encodeURIComponent($json.cfg.airtableBaseId) + '/' + encodeURIComponent($json.cfg.videosTableId) + '/' + encodeURIComponent($json.recordId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_AIRTABLE",
+          "name": "Proyect One - Airtable"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "proyectOneVideos-29",
+      "name": "Comprobar marca de error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5280,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function failedVideoResult(response, ctx) {\n  return { ...ctx, action: 'error', message: responseOk(response) ? ctx.message : ctx.message + ' No se pudo actualizar su estado en Airtable.' };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: failedVideoResult($json, $(\"Interpretar estado\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-30",
+      "name": "Guardar video terminado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        4620,
+        -240
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.cfg.airtableBaseUrl + '/' + encodeURIComponent($json.cfg.airtableBaseId) + '/' + encodeURIComponent($json.cfg.videosTableId) + '/' + encodeURIComponent($json.recordId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.requestBody }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_AIRTABLE",
+          "name": "Proyect One - Airtable"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "proyectOneVideos-31",
+      "name": "Comprobar video guardado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        -240
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function completedVideoResult(response, ctx) {\n  if (!responseOk(response) || response.body?.id !== ctx.recordId || response.body?.fields?.Estado !== 'Completado' || response.body?.fields?.URL_VideoGenerado !== ctx.videoUrl) return { ...ctx, action: 'error', outcome: 'completion_not_saved', message: 'El video está listo pero Airtable no confirmó su URL. Reanudá con el ID existente.' };\n  return { ...ctx, action: 'notify', outcome: 'completed', message: 'Video listo.' };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: completedVideoResult($json, $(\"Interpretar estado\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-32",
+      "name": "Preparar aviso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function prepareVideoNotice(ctx) {\n  const good = ctx.outcome === 'completed';\n  return { ...ctx, notice: { channel: good ? ctx.cfg.slackVideosChannel : ctx.cfg.slackErrorsChannel, text: good ? 'Video listo: ' + ctx.title + '\\nRegistro: ' + ctx.recordId + '\\n' + ctx.videoUrl : 'Revisar video: ' + (ctx.title || ctx.recordId || 'sin registro') + '\\nRegistro: ' + (ctx.recordId || '-') + (ctx.videoId ? '\\nID HeyGen: ' + ctx.videoId : '') + '\\n' + ctx.message, mrkdwn: false, parse: 'none', unfurl_links: false, unfurl_media: false } };\n}\n\nreturn { json: prepareVideoNotice($json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-33",
+      "name": "Avisar por Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        5720,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.cfg.slackBaseUrl + '/chat.postMessage' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.notice }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURAR_SLACK",
+          "name": "Proyect One - Slack"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "proyectOneVideos-34",
+      "name": "Resultado del registro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5940,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function notificationResult(response, ctx) {\n  return { recordId: ctx.recordId || null, videoId: ctx.videoId || null, outcome: ctx.outcome, message: ctx.message, notified: responseOk(response) && response.body?.ok === true, needsNotificationRetry: !(responseOk(response) && response.body?.ok === true) };\n}\n\nfunction responseOk(response) {\n  return !!response && !response.error && Number(response.statusCode) >= 200 && Number(response.statusCode) < 300;\n}\n\nreturn { json: notificationResult($json, $(\"Preparar aviso\").item.json) };"
+      }
+    },
+    {
+      "id": "proyectOneVideos-35",
+      "name": "Resultado omitido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        720
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\n\nreturn {json:{recordId:$json.recordId||null,videoId:$json.videoId||null,outcome:$json.outcome,message:$json.message}};"
+      }
+    },
+    {
+      "id": "proyectOneVideos-36",
+      "name": "Antes de ejecutar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -480
+      ],
+      "parameters": {
+        "content": "## Preparación\nConfigurá los IDs en Configuracion y vinculá las credenciales.\nGeneración deshabilitada por defecto. Habilitala solo después de revisar el costo de HeyGen.\nEjecutá una sola instancia a la vez: Airtable no ofrece bloqueo atómico en este flujo.\nNo cambies a Pendiente un En Proceso sin ID sin revisar HeyGen.",
+        "height": 310,
+        "width": 500
+      }
+    }
+  ],
+  "connections": {
+    "Iniciar manualmente": {
+      "main": [
+        [
+          {
+            "node": "Configuracion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuracion": {
+      "main": [
+        [
+          {
+            "node": "Leer videos de Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer videos de Airtable": {
+      "main": [
+        [
+          {
+            "node": "Reunir registros",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reunir registros": {
+      "main": [
+        [
+          {
+            "node": "Procesar de a uno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar de a uno": {
+      "main": [
+        [
+          {
+            "node": "Resumen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Regular ritmo de Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Regular ritmo de Airtable": {
+      "main": [
+        [
+          {
+            "node": "Preparar registro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar registro": {
+      "main": [
+        [
+          {
+            "node": "Necesita generar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Necesita generar": {
+      "main": [
+        [
+          {
+            "node": "Reservar registro en Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Puede consultar video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Puede consultar video": {
+      "main": [
+        [
+          {
+            "node": "Preparar consulta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requiere aviso inicial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requiere aviso inicial": {
+      "main": [
+        [
+          {
+            "node": "Preparar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resultado omitido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultado omitido": {
+      "main": [
+        [
+          {
+            "node": "Procesar de a uno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar registro en Airtable": {
+      "main": [
+        [
+          {
+            "node": "Comprobar reserva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar reserva": {
+      "main": [
+        [
+          {
+            "node": "Reserva confirmada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserva confirmada": {
+      "main": [
+        [
+          {
+            "node": "Solicitar video a HeyGen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solicitar video a HeyGen": {
+      "main": [
+        [
+          {
+            "node": "Comprobar creacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar creacion": {
+      "main": [
+        [
+          {
+            "node": "HeyGen devolvio ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HeyGen devolvio ID": {
+      "main": [
+        [
+          {
+            "node": "Guardar ID antes de consultar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar ID antes de consultar": {
+      "main": [
+        [
+          {
+            "node": "Comprobar ID guardado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar ID guardado": {
+      "main": [
+        [
+          {
+            "node": "ID guardado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ID guardado": {
+      "main": [
+        [
+          {
+            "node": "Preparar consulta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar consulta": {
+      "main": [
+        [
+          {
+            "node": "Consultar estado en HeyGen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar estado en HeyGen": {
+      "main": [
+        [
+          {
+            "node": "Interpretar estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar estado": {
+      "main": [
+        [
+          {
+            "node": "Video terminado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video terminado": {
+      "main": [
+        [
+          {
+            "node": "Guardar video terminado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Todavia procesando",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Todavia procesando": {
+      "main": [
+        [
+          {
+            "node": "Esperar antes de consultar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HeyGen informo fallo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar antes de consultar": {
+      "main": [
+        [
+          {
+            "node": "Preparar consulta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HeyGen informo fallo": {
+      "main": [
+        [
+          {
+            "node": "Marcar error de generacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar error de generacion": {
+      "main": [
+        [
+          {
+            "node": "Comprobar marca de error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar marca de error": {
+      "main": [
+        [
+          {
+            "node": "Preparar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar video terminado": {
+      "main": [
+        [
+          {
+            "node": "Comprobar video guardado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar video guardado": {
+      "main": [
+        [
+          {
+            "node": "Preparar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar aviso": {
+      "main": [
+        [
+          {
+            "node": "Avisar por Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar por Slack": {
+      "main": [
+        [
+          {
+            "node": "Resultado del registro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultado del registro": {
+      "main": [
+        [
+          {
+            "node": "Procesar de a uno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": false,
+    "timezone": "America/Argentina/Buenos_Aires",
+    "executionTimeout": 7200
+  },
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
