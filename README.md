@@ -21,15 +21,15 @@ También incluye una página HTML con un texto de privacidad pendiente de revisi
 El siguiente esquema resume el recorrido previsto. Son dos flujos independientes:
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph video["1. Generación de video"]
-        direction TB
+        direction LR
         V1["Ejecución manual: leer Airtable"] --> V2["Solicitar video a HeyGen"]
         V2 --> V3["Guardar ID, esperar y consultar URL"]
         V3 --> V4["Actualizar Airtable y avisar por Slack"]
     end
     subgraph audio["2. Transcripción de audio"]
-        direction TB
+        direction LR
         A1["Recibir audio por webhook"] --> A2["Guardar archivo temporal y transcribir"]
         A2 --> A3["Preparar título, descripción y prompt"]
         A3 --> A4["Guardar en Airtable y avisar por Slack"]
